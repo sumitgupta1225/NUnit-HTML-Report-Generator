@@ -58,7 +58,17 @@ namespace Jatech.NUnit
         private static readonly List<string> HelpParameters = new List<string>() { "?", "/?", "help" };
 
         #endregion
-
+        private static bool isFolder = false;
+        private static int totalTestTests = 0;
+        private static int totalTestErrors = 0;
+        private static int totalTestFailures = 0;
+        private static int totalTestNotRun = 0;
+        private static int totalTestInconclusive = 0;
+        private static int totalTestIgnored = 0;
+        private static int totalTestSkipped = 0;
+        private static int totalTestInvalid = 0;
+        private static string testPlatform;
+        private static bool isFailedOrError = false;
         #region Main
 
         /// <summary>
@@ -67,7 +77,6 @@ namespace Jatech.NUnit
         /// <param name="args">Array of command-line argument strings.</param>
         static void Main(string[] args)
         {
-            StringBuilder html = new StringBuilder();
             bool ok = false;
             string input = string.Empty, output = string.Empty;
 
@@ -110,16 +119,67 @@ namespace Jatech.NUnit
             // If input file exists and output doesn't exist
             if (ok)
             {
-                // Generate the HTML page
-                html.Append(GetHTML5Header("Results"));
-                html.Append(ProcessFile(input));
-                html.Append(GetHTML5Footer());
-
-                // Save HTML to the output file
-                File.WriteAllText(output, html.ToString());
+                if (isFolder)
+                {
+                    StringBuilder sb = new StringBuilder("<ul>");
+                    foreach (string filePath in Directory.GetFiles(input))
+                    {
+                        isFailedOrError = false;
+                        string fn = Path.GetFileName(Path.ChangeExtension(filePath, "html"));
+                        GenerateHtmlFile(filePath,  $"{output}\\{fn}" );
+                        string link;
+                        if (!isFailedOrError)
+                        {
+                            link =
+                                $"<a href='{fn}' role=\"button\" class=\"text-success no-underline\"> <span class=\"glyphicon glyphicon-ok-sign\"></span> <span class=\"test-result\">" +
+                                $"{fn.Replace(".html", "")}</span></a>";
+                            sb.Append("<li class=\"li-success\">" + link + "</li>");
+                        }
+                        else
+                        {
+                            link =
+                                $"<a href='{fn}' role=\"button\" class=\"text-danger no-underline\"> <span class=\"glyphicon glyphicon-exclamation-sign\"></span> <span class=\"test-result\">" +
+                                $"{fn.Replace(".html","")}</span></a>";
+                            sb.Append("<li class=\"li-danger\">" + link + "</li>");
+                        }
+                    }
+                    sb.Append("</ul>");
+                    GeneratingSummaryFile($"{output}\\" + "NUnitTestsSummary.html", sb.ToString());
+                }
+                else
+                {
+                    GenerateHtmlFile(input, output);
+                }
+                Console.WriteLine("Converstion Process Completed. Press any key to close...");
             }
+            Console.ReadKey();
         }
 
+        private static void GenerateHtmlFile(string input, string output)
+        {
+            StringBuilder html = new StringBuilder();
+            // Generate the HTML page
+            html.Append(GetHTML5Header("Results"));
+            html.Append(ProcessFile(input));
+            html.Append(GetHTML5Footer());
+
+            // Save HTML to the output file
+            File.WriteAllText(output, html.ToString());
+            Console.WriteLine("Generated " + Path.GetFileName(output));
+        }
+
+        private static void GeneratingSummaryFile(string fileName, string fileListHTML)
+        {
+            StringBuilder html = new StringBuilder();
+            html.Append(GetHTML5Header("NUnit Tests Result Summary"));
+            html.Append(ProcessSummaryFile());
+            html.Append(fileListHTML);
+            html.Append(GetHTML5Footer());
+
+            // Save HTML to the output file
+            File.WriteAllText(fileName, html.ToString());
+            Console.WriteLine("Generated Summary File: " + Path.GetFileName(fileName));
+        }
         #endregion
 
         #region Private Methods
@@ -138,7 +198,7 @@ namespace Jatech.NUnit
         private static bool CheckInputAndOutputFile(string input, string output)
         {
             bool ok = false;
-
+           
             if (File.Exists(input))
             {
                 if (!File.Exists(output))
@@ -147,12 +207,21 @@ namespace Jatech.NUnit
                 }
                 else
                 {
-                    Console.WriteLine(string.Format("Output file '{0}' already exists", output));
+                    Console.WriteLine(string.Format("Output file '{0}' already exists.", output));
                 }
+            }
+            else if (Directory.Exists(input))
+            {
+                if (!Directory.Exists(output))
+                {
+                    Directory.CreateDirectory(output);
+                }
+                isFolder = true;
+                ok = true;
             }
             else
             {
-                Console.WriteLine("File does not exist");
+                Console.WriteLine("File/Folder does not exist.");
             }
 
             return ok;
@@ -185,7 +254,19 @@ namespace Jatech.NUnit
             int testSkipped = int.Parse(!string.IsNullOrEmpty(doc.Attribute("skipped").Value) ? doc.Attribute("skipped").Value : "0");
             int testInvalid = int.Parse(!string.IsNullOrEmpty(doc.Attribute("invalid").Value) ? doc.Attribute("invalid").Value : "0");
             DateTime testDate = DateTime.Parse(string.Format("{0} {1}", doc.Attribute("date").Value, doc.Attribute("time").Value));
-            string testPlatform = doc.Element("environment").Attribute("platform").Value;
+            testPlatform = doc.Element("environment").Attribute("platform").Value;
+
+            isFailedOrError = testErrors > 0 || testFailures > 0;
+
+            //Calculating overall summary for all files
+            totalTestTests += testTests;
+            totalTestErrors += testErrors;
+            totalTestFailures += testFailures;
+            totalTestNotRun += testNotRun;
+            totalTestInconclusive += testInconclusive;
+            totalTestIgnored += testIgnored;
+            totalTestSkipped += testSkipped;
+            totalTestInvalid += testInvalid;
 
             // Calculate the success rate
             decimal percentage = 0;
@@ -362,6 +443,52 @@ namespace Jatech.NUnit
             return string.Join(".", namespaces.Select(x => x.Attribute("name").Value));
         }
 
+        private static string ProcessSummaryFile()
+        {
+            StringBuilder html = new StringBuilder();
+            
+            // Calculate the success rate
+            decimal percentage = 0;
+            if (totalTestTests > 0)
+            {
+                int failures = totalTestErrors + totalTestFailures;
+                percentage = decimal.Round(decimal.Divide(failures,totalTestTests) * 100, 1);
+            }
+
+            // Container
+            html.AppendLine("<div class=\"container-fluid page\">");
+
+            // Summary panel
+            html.AppendLine("<div class=\"row\">");
+            html.AppendLine("<div class=\"col-md-12\">");
+            html.AppendLine("<div class=\"panel panel-default\">");
+            html.AppendLine(string.Format("<div class=\"panel-heading\">Summary - <small>{0}</small></div>", "Overall Tests"));
+            html.AppendLine("<div class=\"panel-body\">");
+
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Tests</div><div class=\"val ignore-val\">{0}</div></div>", totalTestTests));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Failures</div><div class=\"val {1}\">{0}</div></div>", totalTestFailures, totalTestFailures > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Errors</div><div class=\"val {1}\">{0}</div></div>", totalTestErrors, totalTestErrors > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Not Run</div><div class=\"val {1}\">{0}</div></div>", totalTestNotRun, totalTestNotRun > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Inconclusive</div><div class=\"val {1}\">{0}</div></div>", totalTestInconclusive, totalTestInconclusive > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Ignored</div><div class=\"val {1}\">{0}</div></div>", totalTestIgnored, totalTestIgnored > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Skipped</div><div class=\"val {1}\">{0}</div></div>", totalTestSkipped, totalTestSkipped > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Invalid</div><div class=\"val {1}\">{0}</div></div>", totalTestInvalid, totalTestInvalid > 0 ? "text-danger" : string.Empty));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Date</div><div class=\"val\">{0}</div></div>", DateTime.Now.ToString("d MMM")));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Time</div><div class=\"val\">{0}</div></div>", DateTime.Now.ToShortTimeString()));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Platform</div><div class=\"val\">{0}</div></div>", testPlatform));
+            html.AppendLine(string.Format("<div class=\"col-md-2 col-sm-4 col-xs-6 text-center\"><div class=\"stat\">Success Rate</div><div class=\"val\">{0}%</div></div>", 100 - percentage));
+
+            // End summary panel
+            html.AppendLine("</div>");
+            html.AppendLine("</div>");
+            html.AppendLine("</div>");
+            
+            // End container
+            html.AppendLine("</div>");
+            html.AppendLine("</div>");
+
+            return html.ToString();
+        }
         #endregion
 
         #region HTML Helpers
@@ -594,6 +721,10 @@ namespace Jatech.NUnit
             header.AppendLine("    .text-default { color: #555; }");
             header.AppendLine("    .text-default:hover { color: #000; }");
             header.AppendLine("    .info { color: #888; }");
+            header.AppendLine("     ul { list-style: none; display: flex; flex-wrap: wrap; }");
+            header.AppendLine("     li { flex: 1 0 20%; margin: 10px; text-align: center; border-width: thin; border-style: solid; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.05);}");
+            header.AppendLine("    .li-success {border-color: #d6e9c6;}");
+            header.AppendLine("    .li-danger {border-color: #ebccd1;}");
             header.AppendLine("    </style>");
             header.AppendLine("  </head>");
             header.AppendLine("  <body>");
